@@ -71,7 +71,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         raster_settings: GaussianRasterizationSettings,
     ):
         # ---- Invoke the compiled CUDA forward rasterizer ----
-        num_rendered, color, radii, geomBuffer, binningBuffer, imgBuffer = \
+        num_rendered, color, depth, radii, geomBuffer, binningBuffer, imgBuffer = \
             _C.rasterize_gaussians(
                 raster_settings.bg,
                 means3D,
@@ -91,8 +91,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                 raster_settings.sh_degree,
                 raster_settings.campos,
                 raster_settings.prefiltered,
-                int(raster_settings.camera_type),
-                raster_settings.render_depth,
+                int(raster_settings.camera_type)
             )
 
         # ---- Save for backward ----
@@ -111,10 +110,10 @@ class _RasterizeGaussians(torch.autograd.Function):
             imgBuffer,
         )
 
-        return color, radii
+        return color, depth, radii
 
     @staticmethod
-    def backward(ctx, grad_out_color, grad_out_radii):
+    def backward(ctx, grad_out_color, grad_out_depth, grad_out_radii):
         # ---- Restore context ----
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
@@ -156,6 +155,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.tanfovx,
             raster_settings.tanfovy,
             grad_out_color,
+            grad_out_depth,
             sh,
             raster_settings.sh_degree,
             raster_settings.campos,
@@ -267,7 +267,7 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp = torch.empty(0, device="cuda")
 
         # ---- Rasterize ----
-        color, radii = rasterize_gaussians(
+        color, depth, radii = rasterize_gaussians(
             means3D,
             means2D,
             shs,
@@ -279,4 +279,4 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
         )
 
-        return color, radii
+        return color, depth, radii

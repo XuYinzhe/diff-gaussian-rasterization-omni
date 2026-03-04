@@ -46,7 +46,7 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     return lambda;
 }
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -66,8 +66,7 @@ RasterizeGaussiansCUDA(
 	const int degree,
 	const torch::Tensor& campos,
 	const bool prefiltered,
-	const int camera_type,
-	const bool render_depth)
+	const int camera_type)
 {
 	if (means3D.ndimension() != 2 || means3D.size(1) != 3)
 	{
@@ -82,6 +81,7 @@ RasterizeGaussiansCUDA(
 	auto float_opts = means3D.options().dtype(torch::kFloat32);
 	// 创建输出Tensor
 	torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
+	torch::Tensor out_depth = torch::full({1, H, W}, 0.0, float_opts);
 	torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
 	// 创建过程buffer及其resize函数
 	torch::Device device(torch::kCUDA);
@@ -127,8 +127,8 @@ RasterizeGaussiansCUDA(
 				tan_fovy,
 				prefiltered,
 				out_color.contiguous().data_ptr<float>(),
-				radii.contiguous().data_ptr<int>(),
-				render_depth);
+				out_depth.contiguous().data_ptr<float>(),
+				radii.contiguous().data_ptr<int>());
 		}
 		else if (camera_type == 3) // LONLAT
 		{
@@ -152,15 +152,15 @@ RasterizeGaussiansCUDA(
 				campos.contiguous().data_ptr<float>(),
 				prefiltered,
 				out_color.contiguous().data_ptr<float>(),
-				radii.contiguous().data_ptr<int>(),
-				render_depth);
+				out_depth.contiguous().data_ptr<float>(),
+				radii.contiguous().data_ptr<int>());
 		}
 		else
 		{
 			throw std::runtime_error("[CudaRasterizer]Invalid camera_type");
 		}
 	}
-	return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer);
+	return std::make_tuple(rendered, out_color, out_depth, radii, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -178,6 +178,7 @@ RasterizeGaussiansBackwardCUDA(
 	const float tan_fovx,
 	const float tan_fovy,
 	const torch::Tensor& dL_dout_color,
+	const torch::Tensor& dL_dout_depth,
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
@@ -200,6 +201,7 @@ RasterizeGaussiansBackwardCUDA(
 	torch::Tensor dL_dmeans3D = torch::zeros({P, 3}, means3D.options());
 	torch::Tensor dL_dmeans2D = torch::zeros({P, 3}, means3D.options());
 	torch::Tensor dL_dcolors = torch::zeros({P, NUM_CHANNELS}, means3D.options());
+	torch::Tensor dL_ddepthi = torch::zeros({P, 1}, means3D.options());
 	torch::Tensor dL_dconic = torch::zeros({P, 2, 2}, means3D.options());
 	torch::Tensor dL_dopacity = torch::zeros({P, 1}, means3D.options());
 	torch::Tensor dL_dcov3D = torch::zeros({P, 6}, means3D.options());
@@ -231,10 +233,12 @@ RasterizeGaussiansBackwardCUDA(
 				reinterpret_cast<char*>(binningBuffer.contiguous().data_ptr()),
 				reinterpret_cast<char*>(imageBuffer.contiguous().data_ptr()),
 				dL_dout_color.contiguous().data_ptr<float>(),
+				dL_dout_depth.contiguous().data_ptr<float>(),
 				dL_dmeans2D.contiguous().data_ptr<float>(),
 				dL_dconic.contiguous().data_ptr<float>(),  
 				dL_dopacity.contiguous().data_ptr<float>(),
 				dL_dcolors.contiguous().data_ptr<float>(),
+				dL_ddepthi.contiguous().data_ptr<float>(),
 				dL_dmeans3D.contiguous().data_ptr<float>(),
 				dL_dcov3D.contiguous().data_ptr<float>(),
 				dL_dsh.contiguous().data_ptr<float>(),
@@ -263,10 +267,12 @@ RasterizeGaussiansBackwardCUDA(
 				reinterpret_cast<char*>(binningBuffer.contiguous().data_ptr()),
 				reinterpret_cast<char*>(imageBuffer.contiguous().data_ptr()),
 				dL_dout_color.contiguous().data_ptr<float>(),
+				dL_dout_depth.contiguous().data_ptr<float>(),
 				dL_dmeans2D.contiguous().data_ptr<float>(),
 				dL_dconic.contiguous().data_ptr<float>(),  
 				dL_dopacity.contiguous().data_ptr<float>(),
 				dL_dcolors.contiguous().data_ptr<float>(),
+				dL_ddepthi.contiguous().data_ptr<float>(),
 				dL_dmeans3D.contiguous().data_ptr<float>(),
 				dL_dcov3D.contiguous().data_ptr<float>(),
 				dL_dsh.contiguous().data_ptr<float>(),

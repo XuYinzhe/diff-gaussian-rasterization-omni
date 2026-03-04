@@ -268,8 +268,8 @@ int CudaRasterizer::Rasterizer::forward(
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
 	float* out_color,
-	int* radii,
-	const bool render_depth)
+	float* out_depth,
+	int* radii)
 {
 	// What comes in is actually tan(fov/2); fov is converted to focal length
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -395,39 +395,22 @@ int CudaRasterizer::Rasterizer::forward(
 			);
 
 	// Let each tile blend its range of Gaussians independently in parallel
-	if (render_depth)
-	{
-		FORWARD::renderDepth(
-			tile_grid, block,
-			imgState.ranges,
-			binningState.point_list,
-			width, height,
-			geomState.means2D,
-			// means3D,
-			// viewmatrix,
-			geomState.depths,
-			geomState.conic_opacity,
-			imgState.accum_alpha,
-			imgState.n_contrib,
-			background,
-			out_color);
-	}
-	else
-	{
-		const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
-		FORWARD::render(
-			tile_grid, block,
-			imgState.ranges,
-			binningState.point_list,
-			width, height,
-			geomState.means2D,
-			feature_ptr,
-			geomState.conic_opacity,
-			imgState.accum_alpha,
-			imgState.n_contrib,
-			background,
-			out_color);
-	}
+	const float* color_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
+	const float* depth_ptr = geomState.depths;
+	FORWARD::render(
+		tile_grid, block,
+		imgState.ranges,
+		binningState.point_list,
+		width, height,
+		geomState.means2D,
+		color_ptr,
+		depth_ptr,
+		geomState.conic_opacity,
+		imgState.accum_alpha,
+		imgState.n_contrib,
+		background,
+		out_color,
+		out_depth);
 
 	return num_rendered;
 }
@@ -454,10 +437,12 @@ void CudaRasterizer::Rasterizer::backward(
 	char* binning_buffer,
 	char* img_buffer,
 	const float* dL_dpix, // grad_outputs[0], i.e., d{loss}_d{forward output}[0], is computed automatically by torch, and the following backward is defined as d{forward output}_d{forward input}
+	const float* dL_dpixdepth,
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
 	float* dL_dcolor,
+	float* dL_ddepthi,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
 	float* dL_dsh,
@@ -486,6 +471,7 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
+	const float* depth_ptr = geomState.depths;
 	BACKWARD::render(
 		tile_grid,
 		block,
@@ -496,13 +482,16 @@ void CudaRasterizer::Rasterizer::backward(
 		geomState.means2D,
 		geomState.conic_opacity,
 		color_ptr,
+		depth_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		dL_dpix,
+		dL_dpixdepth,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
-		dL_dcolor);
+		dL_dcolor,
+		dL_ddepthi);
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
@@ -528,6 +517,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dconic,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
+		dL_ddepthi,
 		dL_dcov3D,
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
@@ -556,8 +546,8 @@ int CudaRasterizer::LonlatRasterizer::forward(
 	const float* cam_pos,
 	const bool prefiltered,
 	float* out_color,
-	int* radii,
-	const bool render_depth)
+	float* out_depth,
+	int* radii)
 {
 	// The space required for P 3D points (number of chars, i.e. bytes) is first calculated, then space is allocated via the resize_ interface of the incoming torch Tensor, and finally the location of each member pointer of State is divided on this space
 	size_t chunk_size = required<GeometryState>(P);
@@ -679,39 +669,22 @@ int CudaRasterizer::LonlatRasterizer::forward(
 			);
 
 	// Let each tile blend its range of Gaussians independently in parallel
-	if (render_depth)
-	{		
-		FORWARD::renderDepth(
-			tile_grid, block,
-			imgState.ranges,
-			binningState.point_list,
-			width, height,
-			geomState.means2D,
-			// means3D,
-			// viewmatrix,
-			geomState.depths,
-			geomState.conic_opacity,
-			imgState.accum_alpha,
-			imgState.n_contrib,
-			background,
-			out_color);
-	}
-	else
-	{
-		const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
-		FORWARD::render(
-			tile_grid, block,
-			imgState.ranges,
-			binningState.point_list,
-			width, height,
-			geomState.means2D,
-			feature_ptr,
-			geomState.conic_opacity,
-			imgState.accum_alpha,
-			imgState.n_contrib,
-			background,
-			out_color);
-	}
+	const float* color_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
+	const float* depth_ptr = geomState.depths;
+	FORWARD::render(
+		tile_grid, block,
+		imgState.ranges,
+		binningState.point_list,
+		width, height,
+		geomState.means2D,
+		color_ptr,
+		depth_ptr,
+		geomState.conic_opacity,
+		imgState.accum_alpha,
+		imgState.n_contrib,
+		background,
+		out_color,
+		out_depth);
 
 	return num_rendered;
 }
@@ -736,10 +709,12 @@ void CudaRasterizer::LonlatRasterizer::backward(
 	char* binning_buffer,
 	char* img_buffer,
 	const float* dL_dpix, // grad_outputs[0], i.e., d{loss}_d{forward output}[0], is computed automatically by torch, and the following backward is defined as d{forward output}_d{forward input}
+	const float* dL_dpixdepth,
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
 	float* dL_dcolor,
+	float* dL_ddepthi,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
 	float* dL_dsh,
@@ -766,6 +741,7 @@ void CudaRasterizer::LonlatRasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
+	const float* depth_ptr = geomState.depths;
 	BACKWARD::render(
 		tile_grid,
 		block,
@@ -776,13 +752,16 @@ void CudaRasterizer::LonlatRasterizer::backward(
 		geomState.means2D,
 		geomState.conic_opacity,
 		color_ptr,
+		depth_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		dL_dpix,
+		dL_dpixdepth,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
-		dL_dcolor);
+		dL_dcolor,
+		dL_ddepthi);
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
@@ -806,6 +785,7 @@ void CudaRasterizer::LonlatRasterizer::backward(
 		dL_dconic,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
+		dL_ddepthi,
 		dL_dcov3D,
 		dL_dsh,
 		(glm::vec3*)dL_dscale,

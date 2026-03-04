@@ -59,8 +59,8 @@ namespace CudaRasterizer
 			const float tan_fovx, float tan_fovy,
 			const bool prefiltered,
 			float* out_color,
-			int* radii = nullptr,
-			const bool render_depth = false);
+			float* out_depth,
+			int* radii = nullptr);
 
 		static void backward(
 			const int P, int D, int M, int R,
@@ -82,10 +82,12 @@ namespace CudaRasterizer
 			char* binning_buffer,
 			char* image_buffer,
 			const float* dL_dpix,
+			const float* dL_dpixdepth,
 			float* dL_dmean2D,
 			float* dL_dconic,
 			float* dL_dopacity,
 			float* dL_dcolor,
+			float* dL_ddepthi,
 			float* dL_dmean3D,
 			float* dL_dcov3D,
 			float* dL_dsh,
@@ -120,8 +122,8 @@ namespace CudaRasterizer
 			const float* cam_pos,
 			const bool prefiltered,
 			float* out_color,
-			int* radii = nullptr,
-			const bool render_depth = false);
+			float* out_depth,
+			int* radii = nullptr);
 
 		static void backward(
 			const int P, int D, int M, int R,
@@ -141,10 +143,12 @@ namespace CudaRasterizer
 			char* binning_buffer,
 			char* image_buffer,
 			const float* dL_dpix,
+			const float* dL_dpixdepth,
 			float* dL_dmean2D,
 			float* dL_dconic,
 			float* dL_dopacity,
 			float* dL_dcolor,
+			float* dL_ddepthi,
 			float* dL_dmean3D,
 			float* dL_dcov3D,
 			float* dL_dsh,

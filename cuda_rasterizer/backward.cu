@@ -161,6 +161,7 @@ __global__ void computeCov2DCUDA(int P,
 	const float tan_fovx, float tan_fovy,
 	const float* view_matrix, /*Tcw^T*/
 	const float* dL_dconics,
+	const float* dL_ddepthi,
 	float3* dL_dmeans,
 	float* dL_dcov)
 {
@@ -281,9 +282,13 @@ __global__ void computeCov2DCUDA(int P,
 	float dL_dty = y_grad_mul * -h_y * tz2 * dL_dJ12;
 	float dL_dtz = -h_x * tz2 * dL_dJ00 - h_y * tz2 * dL_dJ11 + (2 * h_x * t.x) * tz3 * dL_dJ02 + (2 * h_y * t.y) * tz3 * dL_dJ12;
 
+	// depthi is computed from the z value of the screen-space coordinates, so it also has a direct gradient path to the 3D mean
+	// dL_dmean += glm::vec3(view[2] * dL_ddepthi[idx], view[6] * dL_ddepthi[idx], view[10] * dL_ddepthi[idx]);
+	float3 dL_dt = { dL_dtx, dL_dty, dL_dtz + dL_ddepthi[idx] };
+
 	// Account for transformation of mean to t
 	// t = transformPoint4x3(mean, view_matrix);
-	float3 dL_dmean = transformVec4x3Transpose({ dL_dtx, dL_dty, dL_dtz }, view_matrix);
+	float3 dL_dmean = transformVec4x3Transpose(dL_dt, view_matrix);
 
 	// Gradients of loss w.r.t. Gaussian means, but only the portion 
 	// that is caused because the mean affects the covariance matrix.
@@ -301,6 +306,7 @@ __global__ void computeCov2DLonLatCUDA(int P,
 	const int width, const int height,
 	const float* view_matrix, /*Tcw^T*/
 	const float* dL_dconics,
+	const float* dL_ddepthi,
 	float3* dL_dmeans,
 	float* dL_dcov,
 	float3* dpx_dt,
@@ -474,9 +480,14 @@ __global__ void computeCov2DLonLatCUDA(int P,
 				   +dL_dJ11 * t.z * temp1
 				   +dL_dJ12 * temp5 * (2.0f * tztz * trxztrxz - txtx * trtr);
 
+	// depthi is computed from the z value of the screen-space coordinates, so it also has a direct gradient path to the 3D mean
+	float r = sqrtf(txtx + tyty + tztz);
+	float3 ddepthi_dt= {-t.x/r, -t.y/r, -t.z/r };
+	float3 dL_dt = { dL_dtx + ddepthi_dt.x * dL_ddepthi[idx], dL_dty + ddepthi_dt.y * dL_ddepthi[idx], dL_dtz + ddepthi_dt.z * dL_ddepthi[idx] };
+
 	// Account for transformation of mean to t
 	// t = transformPoint4x3(mean, view_matrix);
-	float3 dL_dmean = transformVec4x3Transpose({ dL_dtx, dL_dty, dL_dtz }, view_matrix);
+	float3 dL_dmean = transformVec4x3Transpose(dL_dt, view_matrix);
 
 	// Gradients of loss w.r.t. Gaussian means, but only the portion 
 	// that is caused because the mean affects the covariance matrix.
@@ -570,7 +581,6 @@ __global__ void preprocessCUDA(
 	const float3* dL_dmean2D,
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
-	float* dL_ddepthi,
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
@@ -595,9 +605,6 @@ __global__ void preprocessCUDA(
 	dL_dmean.x = (proj[0] * m_w - proj[3] * mul1) * dL_dmean2D[idx].x + (proj[1] * m_w - proj[3] * mul2) * dL_dmean2D[idx].y;
 	dL_dmean.y = (proj[4] * m_w - proj[7] * mul1) * dL_dmean2D[idx].x + (proj[5] * m_w - proj[7] * mul2) * dL_dmean2D[idx].y;
 	dL_dmean.z = (proj[8] * m_w - proj[11] * mul1) * dL_dmean2D[idx].x + (proj[9] * m_w - proj[11] * mul2) * dL_dmean2D[idx].y;
-
-	// depthi is computed from the z value of the screen-space coordinates, so it also has a direct gradient path to the 3D mean
-	dL_dmean += glm::vec3(view[2] * dL_ddepthi[idx], view[6] * dL_ddepthi[idx], view[10] * dL_ddepthi[idx]);
 
 	// That's the second part of the mean gradient. Previous computation
 	// of cov2D and following SH conversion also affects it.
@@ -633,7 +640,6 @@ __global__ void preprocessLonLatCUDA(
 	const float3* dL_dmean2D,
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
-	float* dL_ddepthi,
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
@@ -660,14 +666,6 @@ __global__ void preprocessLonLatCUDA(
 	float dL_dtz = dL_dpx * dpx_dt[idx].z + dL_dpy * dpy_dt[idx].z;
 	float3 dL_dmean3D = transformVec4x3Transpose({ dL_dtx, dL_dty, dL_dtz }, view_matrix);
 	glm::vec3 dL_dmean(dL_dmean3D.x, dL_dmean3D.y, dL_dmean3D.z);
-
-	// depthi is computed from the z value of the screen-space coordinates, so it also has a direct gradient path to the 3D mean
-	float4 m_view;
-	if(!too_close(m, view_matrix, m_view)){
-		float3 ddepthi_dmview = {-m_view.x/m_view.w, -m_view.y/m_view.w, -m_view.z/m_view.w};
-		float3 ddepthi_dm = transformVec4x3Transpose(ddepthi_dmview, view_matrix);
-		dL_dmean += glm::vec3(ddepthi_dm.x * dL_ddepthi[idx], ddepthi_dm.y * dL_ddepthi[idx], ddepthi_dm.z * dL_ddepthi[idx]);
-	}
 
 	// That's the second part of the mean gradient. Previous computation
 	// of cov2D and following SH conversion also affects it.
@@ -914,6 +912,7 @@ void BACKWARD::preprocess(
 		tan_fovy,
 		viewmatrix,
 		dL_dconic,
+		dL_ddepthi,
 		(float3*)dL_dmean3D,
 		dL_dcov3D);
 
@@ -937,7 +936,6 @@ void BACKWARD::preprocess(
 		(float3*)dL_dmean2D,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
-		dL_ddepthi,
 		dL_dcov3D,
 		dL_dsh,
 		dL_dscale,
@@ -1023,6 +1021,7 @@ void BACKWARD::preprocessLonlat(
 		W, H,
 		viewmatrix,
 		dL_dconic,
+		dL_ddepthi,
 		(float3*)dL_dmean3D,
 		dL_dcov3D,
 		dpx_dt,
@@ -1050,7 +1049,6 @@ void BACKWARD::preprocessLonlat(
 		(float3*)dL_dmean2D,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
-		dL_ddepthi,
 		dL_dcov3D,
 		dL_dsh,
 		dL_dscale,

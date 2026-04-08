@@ -43,3 +43,7 @@
 # mine
 build
 *egg-info
+
+# python build
+__pycache__
+*.pyc

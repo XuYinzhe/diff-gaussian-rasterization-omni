@@ -46,7 +46,7 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     return lambda;
 }
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -82,6 +82,7 @@ RasterizeGaussiansCUDA(
 	// 创建输出Tensor
 	torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
 	torch::Tensor out_depth = torch::full({1, H, W}, 0.0, float_opts);
+	torch::Tensor out_opacity = torch::full({1, H, W}, 0.0, float_opts);
 	torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
 	// 创建过程buffer及其resize函数
 	torch::Device device(torch::kCUDA);
@@ -128,6 +129,7 @@ RasterizeGaussiansCUDA(
 				prefiltered,
 				out_color.contiguous().data_ptr<float>(),
 				out_depth.contiguous().data_ptr<float>(),
+				out_opacity.contiguous().data_ptr<float>(),
 				radii.contiguous().data_ptr<int>());
 		}
 		else if (camera_type == 3) // LONLAT
@@ -153,6 +155,7 @@ RasterizeGaussiansCUDA(
 				prefiltered,
 				out_color.contiguous().data_ptr<float>(),
 				out_depth.contiguous().data_ptr<float>(),
+				out_opacity.contiguous().data_ptr<float>(),
 				radii.contiguous().data_ptr<int>());
 		}
 		else
@@ -160,7 +163,7 @@ RasterizeGaussiansCUDA(
 			throw std::runtime_error("[CudaRasterizer]Invalid camera_type");
 		}
 	}
-	return std::make_tuple(rendered, out_color, out_depth, radii, geomBuffer, binningBuffer, imgBuffer);
+	return std::make_tuple(rendered, out_color, out_depth, out_opacity, radii, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -179,6 +182,7 @@ RasterizeGaussiansBackwardCUDA(
 	const float tan_fovy,
 	const torch::Tensor& dL_dout_color,
 	const torch::Tensor& dL_dout_depth,
+	const torch::Tensor& dL_dout_opacity,
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
@@ -234,6 +238,7 @@ RasterizeGaussiansBackwardCUDA(
 				reinterpret_cast<char*>(imageBuffer.contiguous().data_ptr()),
 				dL_dout_color.contiguous().data_ptr<float>(),
 				dL_dout_depth.contiguous().data_ptr<float>(),
+				dL_dout_opacity.contiguous().data_ptr<float>(),
 				dL_dmeans2D.contiguous().data_ptr<float>(),
 				dL_dconic.contiguous().data_ptr<float>(),  
 				dL_dopacity.contiguous().data_ptr<float>(),
@@ -268,6 +273,7 @@ RasterizeGaussiansBackwardCUDA(
 				reinterpret_cast<char*>(imageBuffer.contiguous().data_ptr()),
 				dL_dout_color.contiguous().data_ptr<float>(),
 				dL_dout_depth.contiguous().data_ptr<float>(),
+				dL_dout_opacity.contiguous().data_ptr<float>(),
 				dL_dmeans2D.contiguous().data_ptr<float>(),
 				dL_dconic.contiguous().data_ptr<float>(),  
 				dL_dopacity.contiguous().data_ptr<float>(),

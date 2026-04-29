@@ -71,7 +71,8 @@ namespace FORWARD
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color,
-		float* out_depth);
+		float* out_depth,
+		float* out_opacity);
 
 	// Perform initial steps for each Gaussian prior to rasterization.
 	void preprocessLonlat(int P, int D, int M,

@@ -696,6 +696,7 @@ renderCUDA(
 	const uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ dL_dpixels, // grad_outputs[0], i.e., d{loss}_d{forward output}[0], is computed automatically by torch, and backward is defined as d{forward output}_d{forward input}
 	const float* __restrict__ dL_dpixeldepths,
+	const float* __restrict__ dL_dpixelopacities,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
@@ -751,6 +752,8 @@ renderCUDA(
 	float accum_depth = 0;
 	float dL_dpixeldepth = inside ? dL_dpixeldepths[pix_id] : 0;
 	float last_depth = 0;
+
+	float dL_dpixelopacity = inside ? dL_dpixelopacities[pix_id] : 0;
 
 	// Gradient of pixel coordinate w.r.t. normalized 
 	// screen-space viewport corrdinates (-1 to 1)
@@ -843,8 +846,10 @@ renderCUDA(
 			float bg_dot_dpixel = 0;
 			for (int i = 0; i < C; i++)
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
-			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
-
+			// dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+			
+			// opacity
+			dL_dalpha += (T_final / (1.f - alpha)) * (dL_dpixelopacity - bg_dot_dpixel);
 
 			// Helpful reusable temporary variables
 			const float dL_dG = con_o.w * dL_dalpha;
@@ -956,6 +961,7 @@ void BACKWARD::render(
 	const uint32_t* n_contrib,
 	const float* dL_dpixels,
 	const float* dL_dpixeldepths,
+	const float* dL_dpixelopacities,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
 	float* dL_dopacity,
@@ -975,6 +981,7 @@ void BACKWARD::render(
 		n_contrib,
 		dL_dpixels,
 		dL_dpixeldepths,
+		dL_dpixelopacities,
 		dL_dmean2D,
 		dL_dconic2D,
 		dL_dopacity,

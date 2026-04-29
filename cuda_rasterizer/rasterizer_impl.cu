@@ -269,6 +269,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const bool prefiltered,
 	float* out_color,
 	float* out_depth,
+	float* out_opacity,
 	int* radii)
 {
 	// What comes in is actually tan(fov/2); fov is converted to focal length
@@ -410,7 +411,8 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_depth);
+		out_depth,
+		out_opacity);
 
 	return num_rendered;
 }
@@ -438,6 +440,7 @@ void CudaRasterizer::Rasterizer::backward(
 	char* img_buffer,
 	const float* dL_dpix, // grad_outputs[0], i.e., d{loss}_d{forward output}[0], is computed automatically by torch, and the following backward is defined as d{forward output}_d{forward input}
 	const float* dL_dpixdepth,
+	const float* dL_dpixopacity,
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
@@ -487,6 +490,7 @@ void CudaRasterizer::Rasterizer::backward(
 		imgState.n_contrib,
 		dL_dpix,
 		dL_dpixdepth,
+		dL_dpixopacity,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
@@ -547,6 +551,7 @@ int CudaRasterizer::LonlatRasterizer::forward(
 	const bool prefiltered,
 	float* out_color,
 	float* out_depth,
+	float* out_opacity,
 	int* radii)
 {
 	// The space required for P 3D points (number of chars, i.e. bytes) is first calculated, then space is allocated via the resize_ interface of the incoming torch Tensor, and finally the location of each member pointer of State is divided on this space
@@ -684,7 +689,8 @@ int CudaRasterizer::LonlatRasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_depth);
+		out_depth,
+		out_opacity);
 
 	return num_rendered;
 }
@@ -710,6 +716,7 @@ void CudaRasterizer::LonlatRasterizer::backward(
 	char* img_buffer,
 	const float* dL_dpix, // grad_outputs[0], i.e., d{loss}_d{forward output}[0], is computed automatically by torch, and the following backward is defined as d{forward output}_d{forward input}
 	const float* dL_dpixdepth,
+	const float* dL_dpixopacity,
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
@@ -757,6 +764,7 @@ void CudaRasterizer::LonlatRasterizer::backward(
 		imgState.n_contrib,
 		dL_dpix,
 		dL_dpixdepth,
+		dL_dpixopacity,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,

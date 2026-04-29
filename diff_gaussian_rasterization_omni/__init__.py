@@ -26,6 +26,7 @@ class GaussianRasterizationSettings(NamedTuple):
     prefiltered: bool
     camera_type: int = CameraModelType.LONLAT
     render_depth: bool = False
+    render_opacity: bool = False
 
 def cpu_deep_copy_tuple(input_tuple):
     return tuple(
@@ -71,7 +72,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         raster_settings: GaussianRasterizationSettings,
     ):
         # ---- Invoke the compiled CUDA forward rasterizer ----
-        num_rendered, color, depth, radii, geomBuffer, binningBuffer, imgBuffer = \
+        num_rendered, color, depth, opacity, radii, geomBuffer, binningBuffer, imgBuffer = \
             _C.rasterize_gaussians(
                 raster_settings.bg,
                 means3D,
@@ -110,10 +111,10 @@ class _RasterizeGaussians(torch.autograd.Function):
             imgBuffer,
         )
 
-        return color, depth, radii
+        return color, depth, opacity, radii
 
     @staticmethod
-    def backward(ctx, grad_out_color, grad_out_depth, grad_out_radii):
+    def backward(ctx, grad_out_color, grad_out_depth, grad_out_opacity, grad_out_radii):
         # ---- Restore context ----
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
@@ -156,6 +157,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.tanfovy,
             grad_out_color,
             grad_out_depth,
+            grad_out_opacity,
             sh,
             raster_settings.sh_degree,
             raster_settings.campos,
@@ -222,7 +224,7 @@ class GaussianRasterizer(nn.Module):
         scales: Optional[torch.Tensor] = None,
         rotations: Optional[torch.Tensor] = None,
         cov3D_precomp: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ):
         """
         Args:
             means3D:        (P, 3) 3D positions
@@ -236,6 +238,8 @@ class GaussianRasterizer(nn.Module):
 
         Returns:
             color: (3, H, W) rendered image
+            depth: (1, H, W) rendered depth map
+            opacity: (1, H, W) rendered opacity map
             radii: (P,) integer radii of each Gaussian in screen space
         """
         raster_settings = self.raster_settings
@@ -267,7 +271,7 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp = torch.empty(0, device="cuda")
 
         # ---- Rasterize ----
-        color, depth, radii = rasterize_gaussians(
+        color, depth, opacity, radii = rasterize_gaussians(
             means3D,
             means2D,
             shs,
@@ -279,4 +283,11 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
         )
 
-        return color, depth, radii
+        return_list = [color]
+        if raster_settings.render_depth:
+            return_list.append(depth)
+        if raster_settings.render_opacity:
+            return_list.append(opacity)
+        return_list.append(radii)
+
+        return tuple(return_list)
